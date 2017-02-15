@@ -890,15 +890,15 @@ def get_checks_places(osname, agentConfig):
         log.error(e.args[0])
         sys.exit(3)
 
-    places = [lambda name: os.path.join(agentConfig['additional_checksd'], '%s.py' % name)]
+    places = [lambda name: (os.path.join(agentConfig['additional_checksd'], '%s.py' % name), False)]
 
     try:
         sdk_integrations = get_sdk_integrations_path(osname)
-        places.append(lambda name: os.path.join(sdk_integrations, name, 'check.py'))
+        places.append(lambda name: (os.path.join(sdk_integrations, name, 'check.py'), True))
     except PathNotFound:
         log.debug('No sdk integrations path found')
 
-    places.append(lambda name: os.path.join(checksd_path, '%s.py' % name))
+    places.append(lambda name: (os.path.join(checksd_path, '%s.py' % name), False))
     return places
 
 
@@ -962,11 +962,15 @@ def _update_python_path(check_config):
         sys.path.extend(pythonpath)
 
 
+def validate_sdk_check(check_path):
+    return True
+
+
 def load_check_from_places(check_config, check_name, checks_places, agentConfig):
     '''Find a check named check_name in the given checks_places and try to initialize it with the given check_config.
     A failure (`load_failure`) can happen when the check class can't be validated or when the check can't be initialized. '''
     load_success, load_failure = {}, {}
-    for check_path_builder in checks_places:
+    for check_path_builder, is_sdk in checks_places:
         check_path = check_path_builder(check_name)
         if not os.path.exists(check_path):
             continue
@@ -974,6 +978,11 @@ def load_check_from_places(check_config, check_name, checks_places, agentConfig)
         check_is_valid, check_class, load_failure = get_valid_check_class(check_name, check_path)
         if not check_is_valid:
             continue
+
+        if is_sdk:
+            valid = validate_sdk_check(check_path)
+            if not valid:
+                log.warn("The SDK check was designed for an older core - it could break.")
 
         load_success, load_failure = _initialize_check(
             check_config, check_name, check_class, agentConfig
